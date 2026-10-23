@@ -16,12 +16,12 @@
 //   - never-throw boundaries: any import/build/convert failure degrades to IDENTITY
 //     (input returned unchanged), never a throw into the caller.
 //
-// Design decisions (ported from OpenMusic):
-//   D-01  Phrase-level conversion (tongwen char + phrase dicts). Phrase quality
-//         disambiguates 头发→頭髮 and 里→裡/裏 — char-only libs can't.
-//   D-03  Client-side, dict via DYNAMIC import() — out of the initial chunk.
-//   D-04  Offline-eligibility rides the kana/hangul-FIRST classifier in ./detect,
-//         so Japanese-kanji lines (kana present) are NOT s2t-converted.
+// Design decisions:
+//   - Phrase-level conversion (tongwen char + phrase dicts). Phrase quality
+//     disambiguates 头发→頭髮 and 里→裡/裏 — char-only libs can't.
+//   - Client-side, dict via DYNAMIC import() — out of the initial chunk.
+//   - Offline-eligibility rides the kana/hangul-FIRST classifier in ./detect,
+//     so Japanese-kanji lines (kana present) are NOT s2t-converted.
 //
 // Pure .ts: no framework, no browser globals — runs on the edge, in node, and
 // under Vitest (deep-import the walker-free tongwen submodules: the top-level
@@ -155,7 +155,7 @@ export function s2tConvertLineSync(text: string): string | null {
 }
 
 /**
- * D-04 offline-eligibility predicate: is this line safe to convert offline (Chinese)?
+ * Offline-eligibility predicate: is this line safe to convert offline (Chinese)?
  *
  * Delegates to `detectLang`, which classifies kana→'ja' and hangul→'ko' BEFORE Han —
  * so any line containing kana/hangul returns false and is left alone (the
@@ -332,8 +332,8 @@ function s2tMerge(text: string): string | null {
  * Order is load-bearing:
  *   1. empty → the input (nothing to convert, and detectLang would answer 'en' anyway);
  *   2. `!isChineseLine(text)` → the input. THIS is the entire "Chinese only, every
- *      other language passes through untouched" guarantee — one classifier, not two
- *      (D-04). KNOWN, ACCEPTED CEILING: a Japanese line with ZERO kana (pure kanji)
+ *      other language passes through untouched" guarantee — one classifier, not
+ *      two. KNOWN, ACCEPTED CEILING: a Japanese line with ZERO kana (pure kanji)
  *      detects as Chinese and WILL be converted.
  *   3. dispatch and degrade to the INPUT when a converter answers null: zh-Hant goes
  *      through the `s2tMerge` merge (idempotent on already-Traditional input), zh-Hans

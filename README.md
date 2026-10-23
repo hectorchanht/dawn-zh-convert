@@ -8,7 +8,7 @@ Engine: [`tongwen-core`](https://www.npmjs.com/package/tongwen-core) + [`tongwen
 - **Synchronous handles** (`s2tConvertLineSync`, `t2sConvertLineSync`) published once warm — no-flash first renders.
 - **Idempotent s2t merge** — tongwen's s2t phrase table is keyed on Simplified, so direct s2t of an already-Traditional 周杰倫 misses the phrase and per-char maps 杰 → 傑 (→ 周傑倫). The merge folds to Simplified first, then per code point keeps the source spelling wherever t2s changed the char.
 - **Never-throw** — any import/build/convert failure degrades to identity, never a throw.
-- **D-04 Japanese guard** — the kana/hangul-first classifier means Japanese lines (kana present) are never wrongly Traditionalized.
+- **Japanese guard** — the kana/hangul-first classifier means Japanese lines (kana present) are never wrongly Traditionalized.
 
 ## Install
 
@@ -24,7 +24,7 @@ import {
   warmScript,       // await dict builds so the first render doesn't flash
   s2tConvertLines,  // batch Simplified → Traditional (position-aligned)
   t2sConvertLines,  // batch Traditional → Simplified
-  isChineseLine,    // D-04 predicate: safe to convert offline?
+  isChineseLine,    // predicate: safe to convert offline?
   detectLang,       // pure classifier: en | zh-Hant | zh-Hans | ja | ko
   shouldTranslate,  // per-text-unit "should this be translated?" decision
 } from '@dawn-studio/zh-convert';

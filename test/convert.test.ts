@@ -13,16 +13,16 @@ import {
 
 // Pure/node tests (no jsdom, no $app/environment mock, no localStorage): zh-convert is a pure
 // service whose only side effect is a dynamic import() of the tongwen s2t dict, which Vitest
-// resolves natively. These pin the D-01 phrase-level conversion quality AND the D-04
+// resolves natively. These pin the phrase-level conversion quality AND the
 // Japanese-kanji offline-eligibility guard (isChineseLine('さくら') === false).
 
-describe('s2tConvertLines — offline Simplified→Traditional (D-01)', () => {
+describe('s2tConvertLines — offline Simplified→Traditional', () => {
 	it('converts basic characters (per-char single map)', async () => {
 		expect(await s2tConvertLines(['简体中文'])).toEqual(['簡體中文']);
 	});
 
 	it('disambiguates at phrase level (头发→頭髮, not 頭發)', async () => {
-		// D-01 quality claim: a char-only lib would mis-convert 发; the phrase map picks 髮.
+		// Phrase-level quality: a char-only lib would mis-convert 发; the phrase map picks 髮.
 		expect(await s2tConvertLines(['头发'])).toEqual(['頭髮']);
 	});
 
@@ -45,7 +45,7 @@ describe('s2tConvertLines — offline Simplified→Traditional (D-01)', () => {
 	});
 });
 
-describe('t2sConvertLines — Traditional→Simplified for the /api/og cover search (quick-260807-vl1)', () => {
+describe('t2sConvertLines — Traditional→Simplified', () => {
 	// The production repro: the Traditional pair misses every cover tier, the Simplified pair hits
 	// 4/4. og-cover.ts converts FIRST and searches with these outputs.
 	it('converts the probed repro title 止戰之殤 → 止战之殇', async () => {
@@ -92,7 +92,7 @@ describe('t2sConvertLines — Traditional→Simplified for the /api/og cover sea
 	});
 });
 
-describe('isChineseLine — offline-eligibility predicate (D-04)', () => {
+describe('isChineseLine — offline-eligibility predicate', () => {
 	it('is true for Simplified Chinese', () => {
 		expect(isChineseLine('简体')).toBe(true);
 	});
@@ -101,7 +101,7 @@ describe('isChineseLine — offline-eligibility predicate (D-04)', () => {
 		expect(isChineseLine('中國風')).toBe(true);
 	});
 
-	it('is FALSE for lines containing kana (Japanese guard, D-04)', () => {
+	it('is FALSE for lines containing kana (Japanese guard)', () => {
 		// The critical JA-kanji-vs-Chinese edge: kana present ⇒ detectLang→"ja" ⇒ leave for the
 		// API cascade so Japanese lyrics are never wrongly s2t-converted.
 		expect(isChineseLine('さくら')).toBe(false);
@@ -120,15 +120,15 @@ describe('isChineseLine — offline-eligibility predicate (D-04)', () => {
 	});
 });
 
-describe('s2tConvertLineSync / warmS2T — synchronous no-flash path (quick-260712-et3)', () => {
+describe('s2tConvertLineSync / warmS2T — synchronous no-flash path', () => {
 	// The display-name resolver calls s2tConvertLineSync on the FIRST render so a zh-Hant name
 	// paints Traditional immediately instead of Simplified-then-flip. It returns null until the
 	// lazy dict is warm; warmS2T() (fire-and-forget) kicks that load at app boot.
-	it('converts synchronously once the dict is warm (same D-01 quality as the async path)', async () => {
+	it('converts synchronously once the dict is warm (same phrase-level quality as the async path)', async () => {
 		warmS2T(); // kick the lazy load
 		await s2tConvertLines(['简体']); // await the SAME memoized load so the dict is guaranteed built
 		expect(s2tConvertLineSync('简体中文')).toBe('簡體中文'); // per-char
-		expect(s2tConvertLineSync('头发')).toBe('頭髮'); // phrase-level (D-01) on the sync path too
+		expect(s2tConvertLineSync('头发')).toBe('頭髮'); // phrase-level on the sync path too
 	});
 
 	it('passes already-Traditional input through unchanged (identity is a stable result)', async () => {
@@ -142,10 +142,10 @@ describe('s2tConvertLineSync / warmS2T — synchronous no-flash path (quick-2607
 });
 
 // ---------------------------------------------------------------------------------------------
-// quick-260919-2jo — the t2s sync/warm mirror + the direction-dispatching script lock.
+// The t2s sync/warm mirror + the direction-dispatching script lock.
 // ---------------------------------------------------------------------------------------------
 
-describe('t2sConvertLineSync / warmT2S — the sync mirror (quick-260919-2jo)', () => {
+describe('t2sConvertLineSync / warmT2S — the sync mirror', () => {
 	it('converts synchronously once the t2s dict is warm', async () => {
 		await warmScript('zh-Hans'); // awaits the SAME memoized build the sync handle publishes
 		expect(t2sConvertLineSync('繁體中文')).toBe('繁体中文');
@@ -165,7 +165,7 @@ describe('t2sConvertLineSync / warmT2S — the sync mirror (quick-260919-2jo)', 
 	});
 });
 
-describe('lockScriptSync — the Chinese-only script lock (quick-260919-2jo)', () => {
+describe('lockScriptSync — the Chinese-only script lock', () => {
 	it('forces Simplified input to Traditional', async () => {
 		await warmScript('zh-Hant');
 		expect(lockScriptSync('简体', 'zh-Hant')).toBe('簡體');
@@ -185,7 +185,7 @@ describe('lockScriptSync — the Chinese-only script lock (quick-260919-2jo)', (
 		expect(lockScriptSync('周杰伦', 'zh-Hans')).toBe('周杰伦');
 	});
 
-	it('leaves non-Chinese untouched in BOTH directions (the D-04 gate)', async () => {
+	it('leaves non-Chinese untouched in BOTH directions', async () => {
 		await warmScript('zh-Hant');
 		await warmScript('zh-Hans');
 		for (const target of ['zh-Hant', 'zh-Hans'] as const) {
@@ -213,12 +213,12 @@ describe('lockScriptSync — the Chinese-only script lock (quick-260919-2jo)', (
 });
 
 // ---------------------------------------------------------------------------------------------
-// quick-260926-bxg — tongwen's s2t phrase table is keyed on SIMPLIFIED, so an already-Traditional
+// tongwen's s2t phrase table is keyed on SIMPLIFIED, so an already-Traditional
 // line like 周杰倫 misses the phrase 周杰伦 → 周杰倫, falls through to per-char mapping, and 杰 → 傑
 // turns it into 周傑倫. The same artist then renders two ways depending on which source returned it.
 // ---------------------------------------------------------------------------------------------
 
-describe('lockScriptSync zh-Hant — idempotent on already-Traditional input (quick-260926-bxg)', () => {
+describe('lockScriptSync zh-Hant — idempotent on already-Traditional input', () => {
 	it('keeps an already-Traditional name as-is (the bug: 周杰倫 used to become 周傑倫)', async () => {
 		await warmScript('zh-Hant');
 		expect(lockScriptSync('周杰倫', 'zh-Hant')).toBe('周杰倫');
@@ -284,7 +284,7 @@ describe('lockScriptSync zh-Hant — idempotent on already-Traditional input (qu
 	});
 
 	it('PARTIAL warm (s2t only, t2s cold) falls back to direct s2t — never worse than before', async () => {
-		// quick-260926-kvz: warmS2T now warms t2s too, so t2s is held cold by failing its dict import
+		// warmS2T warms t2s too, so t2s is held cold here by failing its dict import
 		// (the t2sConvertLines never-throw idiom) instead of simply not warming it.
 		vi.doMock('tongwen-dict/dist/t2s-char.min.json', () => {
 			throw new Error('chunk load failed');
@@ -311,13 +311,13 @@ describe('lockScriptSync zh-Hant — idempotent on already-Traditional input (qu
 });
 
 // ---------------------------------------------------------------------------------------------
-// quick-260926-kvz — bxg made only the LOCK idempotent. The translation path (names' zh-Hant
+// Only the LOCK was idempotent at first. The translation path (names' zh-Hant
 // no-flash fast path via s2tConvertLineSync, translate.ts resolveZhHant via s2tConvertLines) still
 // ran raw s2t, so a JOOX/HK 周杰倫 became 周傑倫 while a CN 周杰伦 became 周杰倫. Every exported
 // s2t entry point now goes through the same merge.
 // ---------------------------------------------------------------------------------------------
 
-describe('quick-260926-kvz — every exported s2t entry point is idempotent', () => {
+describe('every exported s2t entry point is idempotent', () => {
 	it('s2tConvertLineSync keeps already-Traditional input and still converts Simplified', async () => {
 		await warmScript('zh-Hant');
 		expect(s2tConvertLineSync('周杰倫')).toBe('周杰倫'); // was 周傑倫

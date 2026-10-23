@@ -7,7 +7,7 @@
 // CRITICAL DISTINCTION: kana/hangul use `Script=` (PRIMARY script), NOT
 // `Script_Extensions=`. Script_Extensions includes CJK punctuation shared across scripts
 // (。、・「」…), so `Script_Extensions=Hiragana` matches 。and 、 — every normal Chinese
-// sentence ("你好。今天天氣很好。") would misdetect as Japanese and the D-04
+// sentence ("你好。今天天氣很好。") would misdetect as Japanese and the
 // Japanese-kanji guard (isChineseLine) would collapse. `Script=` matches only
 // characters whose primary script is that script, so shared punctuation stays neutral.
 // HAN uses `Script=Han`, which covers ALL CJK extensions (A–I, astral 𠮷 included) —

@@ -55,7 +55,7 @@ describe('detectLang', () => {
 		expect(detectLang('韓國안녕')).toBe('ko');
 	});
 
-	it('does NOT let shared CJK punctuation flip Chinese to ja/ko (D-04 guard)', () => {
+	it('does NOT let shared CJK punctuation flip Chinese to ja/ko', () => {
 		// 。、・「」 are Script=Common (shared) — only Script_Extensions would claim them
 		// for kana/hangul, which would misdetect every punctuated Chinese sentence.
 		expect(detectLang('你好。今天天氣很好。')).toBe('zh-Hant');
