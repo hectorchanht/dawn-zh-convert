@@ -30,6 +30,48 @@
 
 import { detectLang } from './detect.js';
 
+// Loads the tongwen engine modules, working around two packaging quirks:
+//   1. The top-level `tongwen-core` index eval-time references the DOM global
+//      `NodeFilter` — deep-import the walker-free `converter`/`dictionary`
+//      submodules instead (both ESM and CJS layouts are walker-free there).
+//   2. tongwen-core's ESM uses bare directory imports internally, which plain
+//      Node.js ESM rejects — fall back to the CJS build there. The
+//      `/* @vite-ignore */` hint keeps bundlers from trying to statically
+//      analyze the node:module import (it only ever runs in Node).
+interface TongwenEngine {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	createConverterMap: (maps: { s2t: any[]; t2s: any[] }) => {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		phrase: (lang: any, line: string) => string;
+	};
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	LangType: { s2t: any; t2s: any };
+}
+
+async function loadEngine(): Promise<TongwenEngine> {
+	try {
+		const [converterMod, dictMod] = await Promise.all([
+			import('tongwen-core/esm/converter/index.js'),
+			import('tongwen-core/esm/dictionary/index.js')
+		]);
+		return {
+			createConverterMap: converterMod.createConverterMap,
+			LangType: dictMod.LangType
+		};
+	} catch {
+		const { createRequire } = (await import(/* @vite-ignore */ 'node:module')) as unknown as {
+			createRequire: (path: string) => (id: string) => any;
+		};
+		const require = createRequire(import.meta.url);
+		const converterMod = require('tongwen-core/cjs/converter/index.js');
+		const dictMod = require('tongwen-core/cjs/dictionary/index.js');
+		return {
+			createConverterMap: converterMod.createConverterMap,
+			LangType: dictMod.LangType
+		};
+	}
+}
+
 // A ready-to-use single-line converter. We memoize THIS (not the raw tongwen Converter)
 // so `LangType` stays captured inside the closure and callers never touch tongwen types.
 type ConvertLine = (line: string) => string;
@@ -50,14 +92,17 @@ let convertLineSync: ConvertLine | null = null;
 // the initial chunk. The `t2s: []` below is NOT a stub — it keeps this map s2t-ONLY so
 // an s2t caller never pays for the t2s tables (see buildT2sConvertLine for the mirror).
 async function buildConvertLine(): Promise<ConvertLine> {
-	const [converterMod, dictMod, charMod, phraseMod] = await Promise.all([
-		import('tongwen-core/esm/converter'),
-		import('tongwen-core/esm/dictionary'),
-		import('tongwen-dict/dist/s2t-char.min.json'),
-		import('tongwen-dict/dist/s2t-phrase.min.json')
+	// NOTE (node-compat): the `/index.js` suffix and the `{ with: { type: 'json' } }`
+	// attribute are required for plain Node.js ESM (directory imports and bare JSON
+	// imports throw there); if the ESM build still fails (its internal directory
+	// imports), loadEngine falls back to the CJS build. Bundlers (Vite/webpack)
+	// accept the same form — the vitest suite exercises that path. String literals
+	// are kept (not a helper) so Vite's static analysis still code-splits the dicts.
+	const [{ createConverterMap, LangType }, charMod, phraseMod] = await Promise.all([
+		loadEngine(),
+		import('tongwen-dict/dist/s2t-char.min.json', { with: { type: 'json' } }),
+		import('tongwen-dict/dist/s2t-phrase.min.json', { with: { type: 'json' } })
 	]);
-	const { createConverterMap } = converterMod;
-	const { LangType } = dictMod;
 	// createConverterMap merges the array into length-grouped single/multi maps, so char
 	// (len 1) and phrase (len ≥ 2) entries never collide — order is irrelevant.
 	const converter = createConverterMap({
@@ -160,14 +205,11 @@ let t2sPromise: Promise<ConvertLine> | null = null;
 
 // Deep-import the walker-free `converter` + `dictionary` SUBMODULES (see module header).
 async function buildT2sConvertLine(): Promise<ConvertLine> {
-	const [converterMod, dictMod, charMod, phraseMod] = await Promise.all([
-		import('tongwen-core/esm/converter'),
-		import('tongwen-core/esm/dictionary'),
-		import('tongwen-dict/dist/t2s-char.min.json'),
-		import('tongwen-dict/dist/t2s-phrase.min.json')
+	const [{ createConverterMap, LangType }, charMod, phraseMod] = await Promise.all([
+		loadEngine(),
+		import('tongwen-dict/dist/t2s-char.min.json', { with: { type: 'json' } }),
+		import('tongwen-dict/dist/t2s-phrase.min.json', { with: { type: 'json' } })
 	]);
-	const { createConverterMap } = converterMod;
-	const { LangType } = dictMod;
 	const converter = createConverterMap({
 		s2t: [],
 		t2s: [charMod.default, phraseMod.default]
