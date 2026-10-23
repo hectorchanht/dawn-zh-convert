@@ -1,9 +1,17 @@
 // @dawn-studio/zh-convert — pure source-language detection + per-part translation decision.
 //
-// A hand-rolled Unicode-range + small simplified/traditional char-set classifier.
-// NO external deps, NO unicode property escapes (explicit \u ranges only, so any TS
-// target compiles). Both exports are PURE — no browser globals — so they run on the
-// edge, in node, and under Vitest.
+// Unicode property escapes (\p{...} with the /u flag, ES2018+) instead of hand-maintained
+// hex ranges — they track the Unicode standard automatically (new CJK extensions,
+// historic kana, etc. just work).
+//
+// CRITICAL DISTINCTION: kana/hangul use `Script=` (PRIMARY script), NOT
+// `Script_Extensions=`. Script_Extensions includes CJK punctuation shared across scripts
+// (。、・「」…), so `Script_Extensions=Hiragana` matches 。and 、 — every normal Chinese
+// sentence ("你好。今天天氣很好。") would misdetect as Japanese and the D-04
+// Japanese-kanji guard (isChineseLine) would collapse. `Script=` matches only
+// characters whose primary script is that script, so shared punctuation stays neutral.
+// HAN uses `Script=Han`, which covers ALL CJK extensions (A–I, astral 𠮷 included) —
+// the old explicit range only covered Ext-A + the BMP block.
 //
 // Priority order for detectLang:
 //   1. kana (Hiragana/Katakana)  → 'ja'   (wins over Han when mixed)
@@ -17,17 +25,17 @@
 // Kanji-only Japanese acceptably misclassifies as Chinese — rare for names/lyrics
 // and not worth a dictionary.
 //
-// Ported from OpenMusic's src/lib/i18n/detect.ts.
+// Ported from OpenMusic's src/lib/i18n/detect.ts (which used explicit \u ranges;
+// upgraded here to property escapes per Hector 2026-10-23).
 
 export type LangTag = 'en' | 'zh-Hant' | 'zh-Hans' | 'ja' | 'ko';
 
-// Hiragana U+3040–309F, Katakana U+30A0–30FF, Katakana phonetic ext U+31F0–31FF,
-// halfwidth katakana U+FF66–FF9D.
-const KANA = /[぀-ゟ゠-ヿㇰ-ㇿｦ-ﾝ]/;
-// Hangul syllables U+AC00–D7A3, compatibility jamo U+3130–318F, jamo U+1100–11FF.
-const HANGUL = /[가-힣㄰-㆏ᄀ-ᇿ]/;
-// CJK Unified Ideographs U+4E00–9FFF (+ ext-A U+3400–4DBF).
-const HAN = /[㐀-䶿一-鿿]/;
+// All Hiragana + Katakana (incl. halfwidth ｦ-ﾝ, phonetic extensions), primary script only.
+const KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+// All Hangul (syllables, compatibility jamo, jamo), primary script only.
+const HANGUL = /\p{Script=Hangul}/u;
+// ALL CJK Unified Ideographs, every extension (A–I) — astral 𠮷 included.
+const HAN = /\p{Script=Han}/u;
 
 // High-frequency SIMPLIFIED-ONLY characters (their traditional form differs).
 // ~50 disambiguating chars. Presence ⇒ the text is Simplified Chinese.

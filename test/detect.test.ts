@@ -54,6 +54,22 @@ describe('detectLang', () => {
 	it('lets hangul win over Han when both present', () => {
 		expect(detectLang('韓國안녕')).toBe('ko');
 	});
+
+	it('does NOT let shared CJK punctuation flip Chinese to ja/ko (D-04 guard)', () => {
+		// 。、・「」 are Script=Common (shared) — only Script_Extensions would claim them
+		// for kana/hangul, which would misdetect every punctuated Chinese sentence.
+		expect(detectLang('你好。今天天氣很好。')).toBe('zh-Hant');
+		expect(detectLang('周杰倫、林俊傑')).toBe('zh-Hant');
+		expect(detectLang('「愛」')).toBe('zh-Hant');
+	});
+
+	it('detects astral Han (CJK Ext-B and beyond) as Chinese', () => {
+		expect(detectLang('𠮷野家')).toBe('zh-Hant');
+	});
+
+	it('detects halfwidth katakana as ja', () => {
+		expect(detectLang('ｱｲｳ')).toBe('ja');
+	});
 });
 
 describe('shouldTranslate', () => {
