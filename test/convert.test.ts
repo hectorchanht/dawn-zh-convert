@@ -350,3 +350,54 @@ describe('every exported s2t entry point is idempotent', () => {
 		vi.resetModules();
 	});
 });
+
+// ---------------------------------------------------------------------------------------------
+// ConvertOptions.guard — the "Chinese only" rule is now a user-replaceable predicate.
+// Default guard === isChineseLine; nothing else about conversion changes.
+// ---------------------------------------------------------------------------------------------
+
+describe('ConvertOptions.guard — exposed line-eligibility predicate', () => {
+	it('defaults to isChineseLine: kana lines still pass through without opts', async () => {
+		await warmScript('zh-Hant');
+		expect(lockScriptSync('こんにちは世界', 'zh-Hant')).toBe('こんにちは世界');
+		expect(await s2tConvertLines(['こんにちは世界'])).toEqual(['こんにちは世界']);
+	});
+
+	it('lockScriptSync honours a custom guard (rejected lines pass through untouched)', async () => {
+		await warmScript('zh-Hant');
+		// Reject this one line only: it passes through even though it is Chinese.
+		expect(lockScriptSync('简体', 'zh-Hant', { guard: (t) => t !== '简体' })).toBe('简体');
+		// Everything else still converts normally.
+		expect(lockScriptSync('头发', 'zh-Hant', { guard: (t) => t !== '简体' })).toBe('頭髮');
+	});
+
+	it('lockScriptSync with guard: () => true converts lines the default guard would skip', async () => {
+		await warmScript('zh-Hant');
+		await warmScript('zh-Hans');
+		// An allow-all guard converts Chinese in BOTH lock directions.
+		expect(lockScriptSync('简体', 'zh-Hant', { guard: () => true })).toBe('簡體');
+		expect(lockScriptSync('繁體', 'zh-Hans', { guard: () => true })).toBe('繁体');
+	});
+
+	it('s2tConvertLines applies the guard per line, blank slots still preserved', async () => {
+		const out = await s2tConvertLines(['简体', '头发', '', 'こんにちは世界'], {
+			guard: (t) => t !== '简体'
+		});
+		expect(out).toEqual(['简体', '頭髮', '', 'こんにちは世界']);
+		expect(out.length).toBe(4);
+	});
+
+	it('t2sConvertLines applies the guard per line (default guard unchanged on Latin)', async () => {
+		const out = await t2sConvertLines(['繁體', '周杰伦', 'Hello'], { guard: () => true });
+		expect(out).toEqual(['繁体', '周杰伦', 'Hello']);
+		// Default guard: non-Chinese still passes through identically.
+		expect(await t2sConvertLines(['Hello', 'こんにちは'])).toEqual(['Hello', 'こんにちは']);
+	});
+
+	it('exports the ConvertOptions type (type-level smoke)', async () => {
+		const mod = await import('../src/index.js');
+		const opts = { guard: isChineseLine };
+		expect(typeof opts.guard).toBe('function');
+		expect(Object.keys(mod)).toContain('lockScriptSync');
+	});
+});

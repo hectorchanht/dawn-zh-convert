@@ -10,6 +10,6 @@ export {
 	warmT2S,
 	warmScript
 } from './convert.js';
-export type { ZhScript } from './convert.js';
+export type { ZhScript, ConvertOptions } from './convert.js';
 export { detectLang, shouldTranslate } from './detect.js';
 export type { LangTag } from './detect.js';

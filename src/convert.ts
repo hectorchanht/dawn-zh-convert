@@ -59,7 +59,11 @@ async function loadEngine(): Promise<TongwenEngine> {
 			LangType: dictMod.LangType
 		};
 	} catch {
-		const { createRequire } = (await import(/* @vite-ignore */ 'node:module')) as unknown as {
+		const { createRequire } = (await import(
+			/* @vite-ignore */
+			/* webpackIgnore: true */
+			'node:module'
+		)) as unknown as {
 			createRequire: (path: string) => (id: string) => any;
 		};
 		const require = createRequire(import.meta.url);
@@ -177,14 +181,15 @@ export function isChineseLine(text: string): boolean {
  * Never-throw boundary: any import/build/convert failure degrades to IDENTITY (the
  * input lines returned unchanged) rather than throwing into the caller.
  */
-export async function s2tConvertLines(lines: string[]): Promise<string[]> {
+export async function s2tConvertLines(lines: string[], opts?: ConvertOptions): Promise<string[]> {
 	if (lines.length === 0) return [];
 	try {
 		// allSettled, not Promise.all — all would resolve early on a fast t2s failure
 		// while s2t is still in flight, and every line would come back unconverted.
 		await Promise.allSettled([loadConvertLine(), loadT2sConvertLine()]);
 		// s2t failed to load → per-line identity (the never-throw contract above).
-		return lines.map((line) => (line ? (s2tConvertLineSync(line) ?? line) : line));
+		const guard = effectiveGuard(opts);
+		return lines.map((line) => (line && guard(line) ? (s2tConvertLineSync(line) ?? line) : line));
 	} catch {
 		return lines.slice();
 	}
@@ -244,11 +249,12 @@ function loadT2sConvertLine(): Promise<ConvertLine> {
  * the caller detect "nothing changed" and skip follow-up work. Never throws —
  * degrades to IDENTITY.
  */
-export async function t2sConvertLines(lines: string[]): Promise<string[]> {
+export async function t2sConvertLines(lines: string[], opts?: ConvertOptions): Promise<string[]> {
 	if (lines.length === 0) return [];
 	try {
 		const convert = await loadT2sConvertLine();
-		return lines.map((line) => (line ? convert(line) : line));
+		const guard = effectiveGuard(opts);
+		return lines.map((line) => (line && guard(line) ? convert(line) : line));
 	} catch {
 		return lines.slice();
 	}
@@ -325,15 +331,36 @@ function s2tMerge(text: string): string | null {
 }
 
 /**
+ * Conversion options — the forward-compatible knob surface. Every exported
+ * converter entry point that gates on "Chinese only" accepts this; new knobs
+ * get added here without breaking the call shape.
+ */
+export interface ConvertOptions {
+	/**
+	 * Line-eligibility predicate. Lines it rejects pass through untouched.
+	 * Defaults to `isChineseLine` (kana/hangul-first classifier): a Japanese
+	 * line with ZERO kana (pure kanji) still detects as Chinese and WILL be
+	 * converted — override this guard if your app needs stricter screening.
+	 */
+	guard?: (text: string) => boolean;
+}
+
+/** Resolve the effective guard: caller-supplied, else the default Chinese-only rule. */
+function effectiveGuard(opts?: ConvertOptions): (text: string) => boolean {
+	return opts?.guard ?? isChineseLine;
+}
+
+/**
  * THE script lock. Force one line into `target`'s script, whatever script the
  * upstream returned. The single entry point apps should use; nothing else should
  * reach for a direction-specific sync converter.
  *
  * Order is load-bearing:
  *   1. empty → the input (nothing to convert, and detectLang would answer 'en' anyway);
- *   2. `!isChineseLine(text)` → the input. THIS is the entire "Chinese only, every
- *      other language passes through untouched" guarantee — one classifier, not
- *      two. KNOWN, ACCEPTED CEILING: a Japanese line with ZERO kana (pure kanji)
+ *   2. guard rejects → the input. THIS is the entire "Chinese only, every
+ *      other language passes through untouched" guarantee — one predicate,
+ *      exposed via `opts.guard`, defaulting to `isChineseLine`. KNOWN, ACCEPTED
+ *      CEILING of the default: a Japanese line with ZERO kana (pure kanji)
  *      detects as Chinese and WILL be converted.
  *   3. dispatch and degrade to the INPUT when a converter answers null: zh-Hant goes
  *      through the `s2tMerge` merge (idempotent on already-Traditional input), zh-Hans
@@ -344,9 +371,9 @@ function s2tMerge(text: string): string | null {
  * blank. Callers that care about the cold case should `warmScript(target)` and
  * re-render.
  */
-export function lockScriptSync(text: string, target: ZhScript): string {
+export function lockScriptSync(text: string, target: ZhScript, opts?: ConvertOptions): string {
 	if (!text) return text;
-	if (!isChineseLine(text)) return text;
+	if (!effectiveGuard(opts)(text)) return text;
 	const converted = target === 'zh-Hant' ? s2tMerge(text) : t2sConvertLineSync(text);
 	return converted ?? text;
 }
