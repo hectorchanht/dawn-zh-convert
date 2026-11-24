@@ -29,6 +29,11 @@
 // where there is no DOM).
 
 import { detectLang } from './detect.js';
+import { PROTECTED_WORDS, protectWords, normalizeZhanS2t, normalizeZheT2s } from './protect.js';
+import { convertWithConfigSync } from './opencc.js';
+import type { OpenCCConfigName } from './opencc.js';
+
+export { PROTECTED_WORDS } from './protect.js';
 
 // Loads the tongwen engine modules, working around two packaging quirks:
 //   1. The top-level `tongwen-core` index eval-time references the DOM global
@@ -149,13 +154,15 @@ export function warmS2T(): void {
 /**
  * SYNCHRONOUS Simplified→Traditional for ONE line — the idempotent merge, so
  * already-Traditional input keeps its source spelling (周杰倫 stays 周杰倫).
- * Returns the converted string if the dict is warm, else `null` ("not warm yet" —
- * the caller should warmS2T() and fall back to the async path for this render).
+ * PROTECTED_WORDS are never altered (any direction); stale divination 佔
+ * compounds are normalized back to 占. Returns the converted string if the
+ * dict is warm, else `null` ("not warm yet" — the caller should warmS2T() and
+ * fall back to the async path for this render).
  * Never throws: an empty input or a converter fault returns null (treated as
  * not-ready). Callers MUST gate on isChineseLine() first (this does not re-check).
  */
-export function s2tConvertLineSync(text: string): string | null {
-	return s2tMerge(text);
+export function s2tConvertLineSync(text: string, opts?: ConvertOptions): string | null {
+	return convertCore(text, s2tMerge, 'zh-Hant', opts);
 }
 
 /**
@@ -183,13 +190,18 @@ export function isChineseLine(text: string): boolean {
  */
 export async function s2tConvertLines(lines: string[], opts?: ConvertOptions): Promise<string[]> {
 	if (lines.length === 0) return [];
+	if (opts?.engine === 'opencc') {
+		const { convertWithConfig } = await import('./opencc.js');
+		const config = opts.config ?? 's2t';
+		return Promise.all(lines.map((line) => convertWithConfig(line, config, opts)));
+	}
 	try {
 		// allSettled, not Promise.all — all would resolve early on a fast t2s failure
 		// while s2t is still in flight, and every line would come back unconverted.
 		await Promise.allSettled([loadConvertLine(), loadT2sConvertLine()]);
 		// s2t failed to load → per-line identity (the never-throw contract above).
 		const guard = effectiveGuard(opts);
-		return lines.map((line) => (line && guard(line) ? (s2tConvertLineSync(line) ?? line) : line));
+		return lines.map((line) => (line && guard(line) ? (s2tConvertLineSync(line, opts) ?? line) : line));
 	} catch {
 		return lines.slice();
 	}
@@ -251,10 +263,17 @@ function loadT2sConvertLine(): Promise<ConvertLine> {
  */
 export async function t2sConvertLines(lines: string[], opts?: ConvertOptions): Promise<string[]> {
 	if (lines.length === 0) return [];
+	if (opts?.engine === 'opencc') {
+		const { convertWithConfig } = await import('./opencc.js');
+		const config = opts.config ?? 't2s';
+		return Promise.all(lines.map((line) => convertWithConfig(line, config, opts)));
+	}
 	try {
 		const convert = await loadT2sConvertLine();
 		const guard = effectiveGuard(opts);
-		return lines.map((line) => (line && guard(line) ? convert(line) : line));
+		return lines.map((line) =>
+			line && guard(line) ? (convertCore(line, convert, 'zh-Hans', opts) ?? line) : line
+		);
 	} catch {
 		return lines.slice();
 	}
@@ -274,13 +293,20 @@ export function warmT2S(): void {
  * is warm, else `null`. Never throws. Callers MUST gate on isChineseLine() first.
  * Already-Simplified input passes through unchanged.
  */
-export function t2sConvertLineSync(text: string): string | null {
-	if (!t2sLineSync || !text) return null;
-	try {
-		return t2sLineSync(text);
-	} catch {
-		return null;
-	}
+export function t2sConvertLineSync(text: string, opts?: ConvertOptions): string | null {
+	return convertCore(
+		text,
+		(t) => {
+			if (!t2sLineSync || !t) return null;
+			try {
+				return t2sLineSync(t);
+			} catch {
+				return null;
+			}
+		},
+		'zh-Hans',
+		opts
+	);
 }
 
 /** The two scripts the lock can force. Deliberately NOT a general language tag — the
@@ -343,11 +369,57 @@ export interface ConvertOptions {
 	 * converted — override this guard if your app needs stricter screening.
 	 */
 	guard?: (text: string) => boolean;
+	/**
+	 * Extra words to protect from conversion, ADDED to PROTECTED_WORDS.
+	 * Protected words are swapped for placeholders before conversion and
+	 * restored after — in EVERY direction (no locale change).
+	 */
+	protectedWords?: readonly string[];
+	/**
+	 * Conversion engine. Default 'tongwen' (the historical behaviour — every
+	 * existing caller is unaffected). 'opencc' routes through the OpenCC
+	 * engine (see ./opencc.ts): the async batch converters honour it
+	 * directly; `lockScriptSync` honours it via the warm sync handle, so
+	 * `warmConfig(config)` must have completed first (cold → identity).
+	 */
+	engine?: 'tongwen' | 'opencc';
+	/**
+	 * OpenCC config name (only used when `engine: 'opencc'`). Defaults per
+	 * entry point: 's2t' for s2t paths, 't2s' for t2s paths. See
+	 * OPENCC_CONFIGS for the full OpenCC config table.
+	 */
+	config?: OpenCCConfigName;
 }
 
 /** Resolve the effective guard: caller-supplied, else the default Chinese-only rule. */
 function effectiveGuard(opts?: ConvertOptions): (text: string) => boolean {
 	return opts?.guard ?? isChineseLine;
+}
+
+/**
+ * Shared core: protect → convert → restore → (s2t: fix stale 佔 compounds).
+ * Never throws: a converter fault reads as null (caller degrades to identity).
+ */
+function convertCore(
+	text: string,
+	convert: (t: string) => string | null,
+	target: ZhScript,
+	opts?: ConvertOptions
+): string | null {
+	const words =
+		(opts?.protectedWords?.length ?? 0) > 0
+			? [...PROTECTED_WORDS, ...(opts?.protectedWords ?? [])]
+			: PROTECTED_WORDS;
+	const p = protectWords(text, words);
+	let out: string | null;
+	try {
+		out = convert(p.text);
+	} catch {
+		return null;
+	}
+	if (out == null) return null;
+	const restored = p.restore(out);
+	return target === 'zh-Hant' ? normalizeZhanS2t(restored) : normalizeZheT2s(restored);
 }
 
 /**
@@ -374,7 +446,15 @@ function effectiveGuard(opts?: ConvertOptions): (text: string) => boolean {
 export function lockScriptSync(text: string, target: ZhScript, opts?: ConvertOptions): string {
 	if (!text) return text;
 	if (!effectiveGuard(opts)(text)) return text;
-	const converted = target === 'zh-Hant' ? s2tMerge(text) : t2sConvertLineSync(text);
+	if (opts?.engine === 'opencc') {
+		// OpenCC via the warm sync handle (warmConfig first); cold → identity.
+		const config = opts.config ?? (target === 'zh-Hant' ? 's2t' : 't2s');
+		return convertWithConfigSync(text, config, opts) ?? text;
+	}
+	const converted =
+		target === 'zh-Hant'
+			? convertCore(text, s2tMerge, target, opts)
+			: t2sConvertLineSync(text, opts);
 	return converted ?? text;
 }
 

@@ -52,6 +52,31 @@ describe('t2sConvertLines — Traditional→Simplified', () => {
 		expect(await t2sConvertLines(['止戰之殤'])).toEqual(['止战之殇']);
 	});
 
+	it('converts durative 著 → 着 even where the phrase table misses it (混合著)', async () => {
+		// Regression (trilingual-blog 驗+改, 2026-11-24): tongwen converted
+		// 間隔著 → 间隔着 but left 混合著 unchanged. normalizeZheT2s closes the class.
+		expect(await t2sConvertLines(['間隔著、混合著，直到它真正屬於你'])).toEqual([
+			'间隔着、混合着，直到它真正属于你'
+		]);
+		expect(await t2sConvertLines(['Boss 守著下一階段', '地圖上亮著的地方'])).toEqual([
+			'Boss 守着下一阶段',
+			'地图上亮着的地方'
+		]);
+	});
+
+	it('corrects 夥伴 → 伙伴 (tongwen leaves 夥 unconverted in this compound)', async () => {
+		// Regression (trilingual-blog 驗+改, human-ai-symbiosis, 2026-11-24).
+		expect(await t2sConvertLines(['一個人、一個 AI 夥伴，每天一起工作'])).toEqual([
+			'一个人、一个 AI 伙伴，每天一起工作'
+		]);
+	});
+
+	it('keeps zhù-reading 著 in Simplified （著名/著作/顯著 are correct as-is)', async () => {
+		expect(await t2sConvertLines(['著名作家的新著作，影響顯著'])).toEqual([
+			'著名作家的新著作，影响显著'
+		]);
+	});
+
 	it('converts the probed repro artist 周傑倫 (傑→杰, 倫→伦)', async () => {
 		const [out] = await t2sConvertLines(['周傑倫']);
 		expect(out).toContain('杰');
@@ -399,5 +424,49 @@ describe('ConvertOptions.guard — exposed line-eligibility predicate', () => {
 		const opts = { guard: isChineseLine };
 		expect(typeof opts.guard).toBe('function');
 		expect(Object.keys(mod)).toContain('lockScriptSync');
+	});
+});
+
+describe('PROTECTED_WORDS — 占 never becomes 佔 (any direction)', () => {
+	it('lockScriptSync s2t keeps 占 (was 佔 before the block)', async () => {
+		await warmScript('zh-Hant');
+		expect(lockScriptSync('易經占例庫', 'zh-Hant')).toBe('易經占例庫');
+		expect(lockScriptSync('占辭原文', 'zh-Hant')).toBe('占辭原文');
+		expect(lockScriptSync('陳敬仲占', 'zh-Hant')).toBe('陳敬仲占');
+		expect(lockScriptSync('占卜結果', 'zh-Hant')).toBe('占卜結果');
+	});
+
+	it('lockScriptSync s2t still converts 占有 → 佔有', async () => {
+		await warmScript('zh-Hant');
+		expect(lockScriptSync('占有慾很強', 'zh-Hant')).toBe('佔有慾很強');
+	});
+
+	it('lockScriptSync t2s is unaffected (佔有 → 占有)', async () => {
+		await warmScript('zh-Hans');
+		expect(lockScriptSync('佔有慾很強', 'zh-Hans')).toBe('占有欲很强');
+		expect(lockScriptSync('易經占例庫', 'zh-Hans')).toBe('易经占例库');
+	});
+
+	it('stale 佔 compounds self-heal on s2t re-lock (old caches)', async () => {
+		await warmScript('zh-Hant');
+		expect(lockScriptSync('易經佔例庫', 'zh-Hant')).toBe('易經占例庫');
+		expect(lockScriptSync('佔辭原文', 'zh-Hant')).toBe('占辭原文');
+		expect(lockScriptSync('佔有慾', 'zh-Hant')).toBe('佔有慾');
+	});
+
+	it('s2tConvertLines batch keeps 占', async () => {
+		expect(await s2tConvertLines(['占卜', '占有'])).toEqual(['占卜', '佔有']);
+	});
+
+	it('opts.protectedWords extends the default list', async () => {
+		await warmScript('zh-Hant');
+		// 乾 is a many-to-one char the merge deliberately keeps as 乾;
+		// use it to prove the extension mechanism works end to end.
+		expect(lockScriptSync('乾卦', 'zh-Hant', { protectedWords: ['乾'] })).toBe('乾卦');
+	});
+
+	it('PROTECTED_WORDS is exported from the index', async () => {
+		const mod = await import('../src/index.js');
+		expect(mod.PROTECTED_WORDS).toContain('占');
 	});
 });

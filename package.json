@@ -1,9 +1,10 @@
 {
   "dependencies": {
+    "opencc-js": "^1.4.2",
     "tongwen-core": "4.1.1",
     "tongwen-dict": "1.0.2"
   },
-  "description": "Chinese script conversion for Dawn Studio apps: Simplified <-> Traditional (phrase-aware, idempotent), lazy-loaded, never-throw. Engine: tongwen-core + tongwen-dict (both MIT).",
+  "description": "Chinese script conversion for Dawn Studio apps: Simplified <-> Traditional (phrase-aware, idempotent), lazy-loaded, never-throw. Engines: tongwen-core + tongwen-dict (MIT, default) and OpenCC via opencc-js (opt-in, config-based: s2t/s2tw/s2hk/s2twp/t2s/…).",
   "devDependencies": {
     "@types/node": "^26.6.5",
     "typescript": "^5.6.0",
@@ -21,14 +22,18 @@
   ],
   "keywords": [
     "chinese",
-    "traditional",
-    "simplified",
+    "dawn-studio",
+    "opencc",
+    "s2hk",
     "s2t",
+    "s2tw",
+    "s2twp",
+    "simplified",
     "t2s",
     "tongwen",
-    "zht",
+    "traditional",
     "zhs",
-    "dawn-studio"
+    "zht"
   ],
   "license": "Apache-2.0",
   "main": "./dist/index.js",
@@ -47,5 +52,5 @@
   },
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "0.3.0"
+  "version": "0.5.1"
 }
