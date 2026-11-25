@@ -427,6 +427,78 @@ describe('ConvertOptions.guard — exposed line-eligibility predicate', () => {
 	});
 });
 
+// ---------------------------------------------------------------------------------------------
+// REGRESSION — ZhConvert site default 繁→簡 "silent no-op" report (fleet QC, 2026-11-24).
+// QC fed the demo site's DEFAULT path the sentence below and got empty output +
+// 「已經係目標文字」. Root-cause isolation showed the site's config picker was
+// overriding the direction control (a site-layer default), while THIS path — the
+// exact calls the site makes with default options (warmScript('zh-Hans') then
+// lockScriptSync(text, 'zh-Hans')) — was sound. These tests pin that path forever:
+// if the lazy-warm t2s build ever does break, they fail here first, in the lib,
+// instead of silently no-op'ing on the live site.
+// ---------------------------------------------------------------------------------------------
+
+describe('REGRESSION (QC 2026-11-24) — default lazy-warm t2s path, exactly as the site calls it', () => {
+	const QC_SENTENCE = '乾隆的頭髮很乾燥，頭髮乾燥得像稻草。';
+	const QC_EXPECTED = '乾隆的头发很干燥，头发干燥得像稻草。';
+
+	it('COLD: the sync handle is null before warm (the documented cold contract)', async () => {
+		vi.resetModules();
+		const cold = await import('../src/convert.js');
+		expect(cold.t2sConvertLineSync(QC_SENTENCE)).toBeNull();
+		vi.resetModules();
+	});
+
+	it('after warmScript(zh-Hans), lockScriptSync converts the QC sentence — non-empty, not identity', async () => {
+		vi.resetModules();
+		const m = await import('../src/convert.js');
+		await m.warmScript('zh-Hans'); // the site's warmEngine call for direction=t2s
+		const out = m.lockScriptSync(QC_SENTENCE, 'zh-Hans'); // the site's segConvertSync call
+		expect(out).toBe(QC_EXPECTED);
+		expect(out.length).toBeGreaterThan(0);
+		expect(out).not.toBe(QC_SENTENCE);
+		vi.resetModules();
+	});
+
+	it('the QC sentence traps: 乾隆 keeps 乾 (not 干隆), 頭髮→头发, 乾燥→干燥', async () => {
+		await warmScript('zh-Hans');
+		const out = lockScriptSync(QC_SENTENCE, 'zh-Hans');
+		expect(out.startsWith('乾隆')).toBe(true);
+		expect(out).not.toContain('干隆');
+		expect(out).toContain('头发');
+		expect(out).not.toContain('頭髮');
+		expect(out).toContain('干燥');
+		expect(out).not.toContain('乾燥');
+	});
+
+	it('t2sConvertLines (async batch, default options) converts the QC sentence', async () => {
+		expect(await t2sConvertLines([QC_SENTENCE])).toEqual([QC_EXPECTED]);
+	});
+
+	it('warmT2S fire-and-forget also publishes the sync handle for the QC sentence', async () => {
+		vi.resetModules();
+		const m = await import('../src/convert.js');
+		m.warmT2S();
+		await vi.waitFor(() => expect(m.t2sConvertLineSync(QC_SENTENCE)).toBe(QC_EXPECTED));
+		vi.resetModules();
+	});
+
+	it('the trap set still passes BOTH directions after the QC-sentence warm cycle', async () => {
+		await warmScript('zh-Hant');
+		await warmScript('zh-Hans');
+		// t2s traps
+		expect(lockScriptSync('頭髮', 'zh-Hans')).toBe('头发');
+		expect(lockScriptSync('混合著', 'zh-Hans')).toBe('混合着');
+		expect(lockScriptSync('夥伴', 'zh-Hans')).toBe('伙伴');
+		expect(lockScriptSync('著名', 'zh-Hans')).toBe('著名');
+		// s2t traps
+		expect(lockScriptSync('头发', 'zh-Hant')).toBe('頭髮');
+		expect(lockScriptSync('周杰伦', 'zh-Hant')).toBe('周杰倫');
+		expect(lockScriptSync('周杰倫', 'zh-Hant')).toBe('周杰倫');
+		expect(lockScriptSync('占卜', 'zh-Hant')).toBe('占卜');
+	});
+});
+
 describe('PROTECTED_WORDS — 占 never becomes 佔 (any direction)', () => {
 	it('lockScriptSync s2t keeps 占 (was 佔 before the block)', async () => {
 		await warmScript('zh-Hant');
